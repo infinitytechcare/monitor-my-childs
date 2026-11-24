@@ -1,59 +1,67 @@
 # Family Screen Time
 
-A simple, **transparent** Android app that shows how long each app was used on a
-phone, broken down by day. Built so a parent can see how much time young children
-spend in apps like YouTube on a shared family phone.
+A **transparent** Android parental-control app for a parent's own / shared family
+phone. It limits and locks app use for young children and shows how time is spent —
+without recording the screen, microphone, messages or location.
 
 Repo: `infinitytechcare/monitor-my-childs`
 
-## What it does
+## Features
 
-- Lists every app used on the phone and how long it ran in the foreground.
-- Shows a daily total and lets you step back through previous days.
-- Lets you share a day's report as plain text (to yourself via email, Drive,
-  WhatsApp — whatever you pick from the Android share sheet).
+**Visibility**
+- Daily usage dashboard: how long each app ran, with a daily total.
+
+**Limits & blocking (enforced on-device, no internet needed)**
+- Per-app daily time limits.
+- Total daily screen-time cap across all apps.
+- Allowed-apps only (whitelist): block everything except apps you approve — new
+  installs are blocked automatically too.
+- Scheduled lock windows: bedtime, school, study, or custom times.
+- Forced breaks: after N continuous minutes, lock for a cooldown.
+- When a rule triggers, a clear full-screen lock appears on the phone.
+
+**Local alerts**
+- Notifications on the same phone when a limit is hit, a blocked app is opened,
+  or a lock window starts. Nothing is sent anywhere.
+
+**Tamper resistance**
+- Optional device-admin so a child can't uninstall the app until an adult turns
+  admin off first. (Adds no monitoring ability.)
 
 ## What it does NOT do (by design)
 
-- **No screenshots.** It never captures what is on screen.
-- **No hidden operation.** It has a normal visible icon, and Android forces the
-  phone's owner to turn on "Usage access" by hand in Settings — the app cannot
-  enable itself silently or run as spyware.
-- **No secret upload.** Nothing leaves the phone unless you tap "Share".
+No screenshots or screen recording, no microphone/ambient listening, no reading of
+other apps' messages or notifications, no keylogging, no location tracking, and no
+hidden/stealth mode. Android forces the owner to grant "Usage access" and
+"Draw over other apps" by hand, so it can't run as covert spyware. Install it only
+on phones whose users know it is there.
 
-For a 4–6 year old watching YouTube, this plus YouTube's own **watch history**
-(which shows the exact videos) covers what you need without recording anyone's
-private screen content. Install it only on phones whose users know it is there.
+For the exact videos a child watched on YouTube, open the YouTube app → History,
+or pair this with **YouTube Kids** / **Google Family Link** (free, consent-based).
 
-## How to see the actual videos watched
+## Setup on the phone
 
-Open the **YouTube** app on the phone → Library/You → **History**. It lists every
-video, with time. For stronger controls, pair this with **YouTube Kids** or
-**Google Family Link** (free, built for exactly this).
+1. Install the APK (link below).
+2. Open the app → **Setup** tab → grant **Usage access** and **Draw over other apps**;
+   allow notifications; turn **Protection running** on.
+3. Configure **Limits** and **Schedule**. Optionally turn on uninstall protection.
 
 ## Building the APK
 
-Pushing to `main` builds a debug APK automatically via GitHub Actions
-(`.github/workflows/build.yml`).
+Pushing to `main` builds a debug APK and publishes it to the **latest** GitHub
+release automatically (`.github/workflows/build.yml`).
 
-1. Create the repo `infinitytechcare/monitor-my-childs` on GitHub.
-2. From this folder:
-   ```bash
-   git init
-   git add .
-   git commit -m "Initial commit: Family Screen Time"
-   git branch -M main
-   git remote add origin https://github.com/infinitytechcare/monitor-my-childs.git
-   git push -u origin main
-   ```
-3. Open the repo's **Actions** tab → the "Build APK" run → download the
-   **app-debug-apk** artifact.
-
-Install that APK on the phone, open the app, tap **Open Usage Access settings**,
-and switch on "Family Screen Time".
+Direct download: `https://github.com/infinitytechcare/monitor-my-childs/releases/download/latest/app-debug.apk`
 
 ## Tech
 
 - Kotlin + Jetpack Compose (Material 3)
-- `UsageStatsManager` for app usage (needs the user-granted `PACKAGE_USAGE_STATS`)
+- `UsageStatsManager` (app usage), `WindowManager` overlay (lock screen),
+  foreground `Service`, optional `DeviceAdminReceiver`
 - Gradle 8.9 · AGP 8.6.1 · Kotlin 2.0.20 · compileSdk 34 · minSdk 26
+
+## Roadmap (needs your own cloud setup)
+
+- Firebase remote lock/unlock and "ask for more time" requests (needs a free
+  Firebase project + `google-services.json`).
+- Auto daily usage summary to Google Drive (needs Drive OAuth setup).
