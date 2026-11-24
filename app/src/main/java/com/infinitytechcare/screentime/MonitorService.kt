@@ -4,6 +4,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.Service
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
@@ -25,7 +26,6 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
-import androidx.lifecycle.LifecycleService
 import java.util.Calendar
 
 private data class BlockInfo(val type: String, val message: String)
@@ -35,7 +35,7 @@ private data class BlockInfo(val type: String, val message: String)
  * full-screen lock over a blocked app. It never records or sends anything —
  * it only reads which app is in the foreground and shows a lock when a rule says so.
  */
-class MonitorService : LifecycleService() {
+class MonitorService : Service() {
 
     private val handler = Handler(Looper.getMainLooper())
     private var windowManager: WindowManager? = null
@@ -78,10 +78,7 @@ class MonitorService : LifecycleService() {
         return START_STICKY
     }
 
-    override fun onBind(intent: Intent): IBinder? {
-        super.onBind(intent)
-        return null
-    }
+    override fun onBind(intent: Intent): IBinder? = null
 
     override fun onDestroy() {
         handler.removeCallbacks(tick)
