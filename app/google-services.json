@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "412335903681",
+    "project_id": "monitor-my-childs",
+    "storage_bucket": "monitor-my-childs.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:412335903681:android:63b373da2edc8b4f07d540",
+        "android_client_info": {
+          "package_name": "com.infinitytechcare.screentime"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCdOurKwl9eOXfYz-M_4fosdGzx5PwgymE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

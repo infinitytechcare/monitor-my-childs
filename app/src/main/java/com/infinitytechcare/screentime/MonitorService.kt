@@ -26,6 +26,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import com.google.firebase.firestore.ListenerRegistration
 import java.util.Calendar
 
 private data class BlockInfo(val type: String, val message: String)
@@ -53,6 +54,12 @@ class MonitorService : Service() {
     // alert edge-detection so we notify once per event, not every tick
     private var lastAlertKey: String? = null
 
+    // remote control (set by the Firebase listener)
+    private var remoteLocked = false
+    private var remoteBonusUntil = 0L
+    private var remoteReg: ListenerRegistration? = null
+    private var remoteStarting = false
+
     private val tick = object : Runnable {
         override fun run() {
             try {
@@ -69,6 +76,35 @@ class MonitorService : Service() {
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         homePackage = resolveHomePackage()
         startForegroundNotification()
+        startRemoteListener()
+    }
+
+    private fun startRemoteListener() {
+        if (remoteStarting || remoteReg != null) return
+        if (!Prefs.remoteReady(this) || Prefs.role(this) != "child") return
+        remoteStarting = true
+        RemoteRepo.ensureAuth { ok ->
+            remoteStarting = false
+            if (!ok) return@ensureAuth
+            RemoteRepo.registerChild(this)
+            remoteReg = RemoteRepo.listenMyDevice(this) { locked, bonusUntil ->
+                remoteLocked = locked
+                remoteBonusUntil = bonusUntil
+            }
+        }
+    }
+
+    /** Attach or detach the remote listener as settings change at runtime. */
+    private fun syncRemote() {
+        val shouldListen = Prefs.remoteReady(this) && Prefs.role(this) == "child"
+        if (shouldListen) {
+            startRemoteListener()
+        } else if (remoteReg != null) {
+            remoteReg?.remove()
+            remoteReg = null
+            remoteLocked = false
+            remoteBonusUntil = 0L
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -82,6 +118,7 @@ class MonitorService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacks(tick)
+        remoteReg?.remove()
         removeOverlay()
         super.onDestroy()
     }
@@ -94,6 +131,8 @@ class MonitorService : Service() {
             stopSelf()
             return
         }
+
+        syncRemote()
 
         val fg = foregroundApp()
         val isSystemish = fg == null || fg == packageName ||
@@ -134,6 +173,15 @@ class MonitorService : Service() {
 
     private fun blockReason(pkg: String): BlockInfo? {
         val now = System.currentTimeMillis()
+
+        // 0. Remote lock set by a parent — overrides everything.
+        if (remoteLocked) {
+            return BlockInfo("remote", "Locked by parent.")
+        }
+        // Remote bonus time granted — free pass from the other rules until it ends.
+        if (now < remoteBonusUntil) {
+            return null
+        }
 
         // 1. Forced break
         if (now < breakUntil) {

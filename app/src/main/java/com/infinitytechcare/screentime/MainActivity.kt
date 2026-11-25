@@ -26,6 +26,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Lock
@@ -65,6 +66,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.google.firebase.firestore.ListenerRegistration
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
@@ -112,7 +114,7 @@ fun Root() {
         onDispose { owner.lifecycle.removeObserver(obs) }
     }
 
-    val titles = listOf("Today", "Limits", "Schedule", "Setup")
+    val titles = listOf("Today", "Limits", "Schedule", "Setup", "Remote")
     Scaffold(
         topBar = { TopAppBar(title = { Text("Family Screen Time · ${titles[tab]}") }) },
         bottomBar = {
@@ -133,6 +135,10 @@ fun Root() {
                     selected = tab == 3, onClick = { tab = 3 },
                     icon = { Icon(Icons.Default.Settings, null) }, label = { Text("Setup") }
                 )
+                NavigationBarItem(
+                    selected = tab == 4, onClick = { tab = 4 },
+                    icon = { Icon(Icons.Default.AccountCircle, null) }, label = { Text("Remote") }
+                )
             }
         }
     ) { pad ->
@@ -141,7 +147,8 @@ fun Root() {
                 0 -> TodayScreen(rev)
                 1 -> LimitsScreen(rev) { rev++ }
                 2 -> ScheduleScreen(rev) { rev++ }
-                else -> SetupScreen(rev) { rev++ }
+                3 -> SetupScreen(rev) { rev++ }
+                else -> RemoteScreen(rev) { rev++ }
             }
         }
     }
@@ -456,6 +463,115 @@ private fun PermRow(name: String, ok: Boolean, onClick: () -> Unit) {
 private fun isAdminActive(ctx: Context): Boolean {
     val dpm = ctx.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
     return dpm.isAdminActive(ComponentName(ctx, AdminReceiver::class.java))
+}
+
+/* ----------------------------- Remote ----------------------------- */
+
+@Composable
+fun RemoteScreen(rev: Int, bump: () -> Unit) {
+    val ctx = LocalContext.current
+    var enabled by remember(rev) { mutableStateOf(Prefs.isRemoteEnabled(ctx)) }
+    var code by remember(rev) { mutableStateOf(Prefs.familyCode(ctx)) }
+    var device by remember(rev) { mutableStateOf(Prefs.deviceName(ctx)) }
+    var role by remember(rev) { mutableStateOf(Prefs.role(ctx)) }
+
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Remote control", fontWeight = FontWeight.Bold)
+                Text("Carries only lock on/off and a short request — no screen, audio, messages or location.", style = MaterialTheme.typography.bodySmall)
+            }
+            Switch(checked = enabled, onCheckedChange = { Prefs.setRemoteEnabled(ctx, it); enabled = it })
+        }
+
+        OutlinedTextField(code, { code = it; Prefs.setFamilyCode(ctx, it) }, label = { Text("Family code (same on both phones)") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+        OutlinedTextField(device, { device = it; Prefs.setDeviceName(ctx, it) }, label = { Text("This device's name (unique)") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+
+        Spacer(Modifier.height(12.dp))
+        Text("This phone's role", fontWeight = FontWeight.Bold)
+        Row(Modifier.padding(top = 4.dp)) {
+            if (role == "parent") Button(onClick = {}) { Text("Parent") }
+            else OutlinedButton(onClick = { role = "parent"; Prefs.setRole(ctx, "parent") }) { Text("Parent") }
+            Spacer(Modifier.width(8.dp))
+            if (role == "child") Button(onClick = {}) { Text("Child") }
+            else OutlinedButton(onClick = { role = "child"; Prefs.setRole(ctx, "child") }) { Text("Child") }
+        }
+
+        Spacer(Modifier.height(16.dp))
+        HorizontalDivider()
+        Spacer(Modifier.height(16.dp))
+
+        if (!enabled || code.isBlank() || device.isBlank()) {
+            Text("Turn on remote control and fill in the family code and device name on both phones.", style = MaterialTheme.typography.bodySmall)
+        } else if (role == "child") {
+            ChildRemote(ctx, code, device)
+        } else {
+            ParentRemote(ctx, code)
+        }
+        Spacer(Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun ChildRemote(ctx: Context, code: String, device: String) {
+    var locked by remember { mutableStateOf(false) }
+    DisposableEffect(code, device) {
+        var reg: ListenerRegistration? = null
+        RemoteRepo.ensureAuth { ok ->
+            if (ok) reg = RemoteRepo.listenMyDevice(ctx) { l, _ -> locked = l }
+        }
+        onDispose { reg?.remove() }
+    }
+    var msg by remember { mutableStateOf("") }
+    Text("This is a CHILD device.", fontWeight = FontWeight.Bold)
+    Text(if (locked) "Status: Locked by parent" else "Status: Unlocked", color = if (locked) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
+    Spacer(Modifier.height(12.dp))
+    OutlinedTextField(msg, { msg = it }, label = { Text("Message (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+    Spacer(Modifier.height(8.dp))
+    Button(onClick = {
+        RemoteRepo.ensureAuth { ok -> if (ok) RemoteRepo.askForTime(ctx, msg.ifBlank { "Can I get more time?" }) }
+        msg = ""
+    }) { Text("Ask parent for more time") }
+}
+
+@Composable
+private fun ParentRemote(ctx: Context, code: String) {
+    var devices by remember { mutableStateOf<List<RemoteDevice>>(emptyList()) }
+    DisposableEffect(code) {
+        var reg: ListenerRegistration? = null
+        RemoteRepo.ensureAuth { ok ->
+            if (ok) reg = RemoteRepo.listenDevices(code) { devices = it }
+        }
+        onDispose { reg?.remove() }
+    }
+    Text("Child devices under \"$code\"", fontWeight = FontWeight.Bold)
+    Spacer(Modifier.height(8.dp))
+    if (devices.isEmpty()) {
+        Text("No child devices yet. Open the app on the child phone with the same family code, set its role to Child, and turn Protection on.", style = MaterialTheme.typography.bodySmall)
+    }
+    devices.forEach { d ->
+        Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+            Column(Modifier.padding(12.dp)) {
+                Text(d.name, fontWeight = FontWeight.Bold)
+                Text(if (d.locked) "Locked" else "Unlocked", color = if (d.locked) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
+                Row(Modifier.padding(top = 6.dp)) {
+                    if (d.locked) Button(onClick = { RemoteRepo.setLocked(code, d.name, false) }) { Text("Unlock") }
+                    else Button(onClick = { RemoteRepo.setLocked(code, d.name, true) }) { Text("Lock now") }
+                    Spacer(Modifier.width(8.dp))
+                    OutlinedButton(onClick = { RemoteRepo.grantMinutes(code, d.name, 30) }) { Text("+30 min") }
+                }
+                if (d.requestPending) {
+                    Spacer(Modifier.height(8.dp))
+                    Text("Request: ${d.requestText}", color = MaterialTheme.colorScheme.error)
+                    Row(Modifier.padding(top = 4.dp)) {
+                        Button(onClick = { RemoteRepo.grantMinutes(code, d.name, 15) }) { Text("Approve +15m") }
+                        Spacer(Modifier.width(8.dp))
+                        OutlinedButton(onClick = { RemoteRepo.clearRequest(code, d.name) }) { Text("Dismiss") }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /* ----------------------------- shared helpers ----------------------------- */

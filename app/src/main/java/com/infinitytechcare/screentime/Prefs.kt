@@ -100,4 +100,21 @@ object Prefs {
         }
         saveWindows(c, list)
     }
+
+    // --- remote control (Firebase) ---
+    fun isRemoteEnabled(c: Context) = sp(c).getBoolean("rc_on", false)
+    fun setRemoteEnabled(c: Context, v: Boolean) = sp(c).edit().putBoolean("rc_on", v).apply()
+
+    fun familyCode(c: Context): String = sp(c).getString("rc_code", "") ?: ""
+    fun setFamilyCode(c: Context, v: String) = sp(c).edit().putString("rc_code", v.trim()).apply()
+
+    fun deviceName(c: Context): String = sp(c).getString("rc_device", "") ?: ""
+    fun setDeviceName(c: Context, v: String) = sp(c).edit().putString("rc_device", v.trim()).apply()
+
+    // "parent" or "child"
+    fun role(c: Context): String = sp(c).getString("rc_role", "child") ?: "child"
+    fun setRole(c: Context, v: String) = sp(c).edit().putString("rc_role", v).apply()
+
+    fun remoteReady(c: Context): Boolean =
+        isRemoteEnabled(c) && familyCode(c).isNotBlank() && deviceName(c).isNotBlank()
 }
