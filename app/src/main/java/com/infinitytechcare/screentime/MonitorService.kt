@@ -59,6 +59,7 @@ class MonitorService : Service() {
 
     // alert edge-detection so we notify once per event, not every tick
     private var lastAlertKey: String? = null
+    private var lastRemoteBlockKey: String? = null
 
     // remote control (set by the Firebase listener)
     private var remoteLocked = false
@@ -66,6 +67,14 @@ class MonitorService : Service() {
     private var remoteReg: ListenerRegistration? = null
     private var remoteStarting = false
     private var lastUsagePush = 0L
+    private var lastBatteryPush = 0L
+
+    // remote timed lock + geofence (set by the command listener)
+    private var remoteLockUntil = 0L
+    private var zoneLat: Double? = null
+    private var zoneLng: Double? = null
+    private var zoneRadius = 0.0
+    private var lastInZone: Boolean? = null
 
     // location sharing
     private var locationManager: LocationManager? = null
@@ -73,6 +82,7 @@ class MonitorService : Service() {
     private val locationListener = object : LocationListener {
         override fun onLocationChanged(loc: Location) {
             RemoteRepo.updateLocation(this@MonitorService, loc.latitude, loc.longitude)
+            checkGeofence(loc)
         }
 
         override fun onStatusChanged(provider: String?, status: Int, extras: android.os.Bundle?) {}
@@ -107,10 +117,80 @@ class MonitorService : Service() {
             remoteStarting = false
             if (!ok) return@ensureAuth
             RemoteRepo.registerChild(this)
-            remoteReg = RemoteRepo.listenMyDevice(this) { locked, bonusUntil ->
-                remoteLocked = locked
-                remoteBonusUntil = bonusUntil
+            remoteReg = RemoteRepo.listenMyDevice(this) { cmd -> applyCommand(cmd) }
+        }
+    }
+
+    private fun applyCommand(cmd: RemoteCommand) {
+        remoteLocked = cmd.locked
+        remoteBonusUntil = cmd.bonusUntil
+        remoteLockUntil = cmd.lockUntil
+        zoneLat = cmd.zoneLat
+        zoneLng = cmd.zoneLng
+        zoneRadius = cmd.zoneRadius
+
+        // remote configuration from the parent
+        cmd.cfgTotalCap?.let { Prefs.setTotalCapMinutes(this, it.toInt()) }
+        cmd.cfgWhitelist?.let { Prefs.setWhitelistEnabled(this, it) }
+        if (cmd.cfgBedStart != null && cmd.cfgBedEnd != null) {
+            Prefs.windows(this).filter { it.label == "Bedtime" }.forEach { Prefs.removeWindow(this, it) }
+            Prefs.addWindow(this, LockWindow(cmd.cfgBedStart.toInt(), cmd.cfgBedEnd.toInt(), "Bedtime"))
+        }
+        if (cmd.allowApp.isNotBlank()) {
+            Prefs.setAppAllowed(this, cmd.allowApp, true)
+            RemoteRepo.clearAllowApp(this)
+        }
+        if (cmd.locRequest) {
+            pushImmediateLocation()
+            RemoteRepo.clearLocRequest(this)
+        }
+    }
+
+    private fun pushImmediateLocation() {
+        if (!hasLocationPermission()) return
+        val lm = locationManager ?: (getSystemService(Context.LOCATION_SERVICE) as LocationManager).also { locationManager = it }
+        val last = try {
+            lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+                ?: lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+        } catch (_: SecurityException) {
+            null
+        }
+        if (last != null) {
+            RemoteRepo.updateLocation(this, last.latitude, last.longitude)
+            checkGeofence(last)
+        }
+    }
+
+    private fun checkGeofence(loc: Location) {
+        val zLat = zoneLat
+        val zLng = zoneLng
+        if (zLat == null || zLng == null || zoneRadius <= 0) {
+            if (lastInZone != null) {
+                lastInZone = null
+                RemoteRepo.updateZoneStatus(this, hasZone = false, inZone = true)
             }
+            return
+        }
+        val out = FloatArray(1)
+        Location.distanceBetween(loc.latitude, loc.longitude, zLat, zLng, out)
+        val inside = out[0] <= zoneRadius
+        if (lastInZone == null || lastInZone != inside) {
+            lastInZone = inside
+            RemoteRepo.updateZoneStatus(this, hasZone = true, inZone = inside)
+        }
+    }
+
+    private fun maybePushBattery() {
+        if (!Prefs.remoteReady(this) || Prefs.role(this) != "child") return
+        if (remoteReg == null) return
+        val now = System.currentTimeMillis()
+        if (now - lastBatteryPush < 15 * 60_000) return
+        lastBatteryPush = now
+        try {
+            val bm = getSystemService(Context.BATTERY_SERVICE) as android.os.BatteryManager
+            val level = bm.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            if (level in 0..100) RemoteRepo.updateBattery(this, level)
+        } catch (_: Exception) {
         }
     }
 
@@ -125,7 +205,17 @@ class MonitorService : Service() {
             val list = UsageRepository.usageForDay(this, 0)
             val totalMin = (list.sumOf { it.millis } / 60_000).toInt()
             val top = list.take(5).map { "${it.label}: ${it.millis / 60_000}m" }
-            RemoteRepo.updateUsage(this, totalMin, top)
+            val fmt = java.text.SimpleDateFormat("EEE d", java.util.Locale.getDefault())
+            val last7 = (0 downTo -6).map { off ->
+                val mins = (UsageRepository.usageForDay(this, off).sumOf { it.millis } / 60_000).toInt()
+                val cal = java.util.Calendar.getInstance()
+                cal.add(java.util.Calendar.DAY_OF_YEAR, off)
+                val h = mins / 60
+                val m = mins % 60
+                val dur = if (h > 0) "${h}h ${m}m" else "${m}m"
+                "${fmt.format(cal.time)}: $dur"
+            }
+            RemoteRepo.updateUsage(this, totalMin, top, last7)
         } catch (_: Exception) {
         }
     }
@@ -214,6 +304,7 @@ class MonitorService : Service() {
         syncRemote()
         syncLocation()
         maybePushUsage()
+        maybePushBattery()
 
         val fg = foregroundApp()
         val isSystemish = fg == null || fg == packageName ||
@@ -229,6 +320,7 @@ class MonitorService : Service() {
         val info = blockReason(fg!!)
         if (info != null) {
             maybeAlert(info, fg)
+            maybeReportBlocked(info, fg)
             showOverlay(info.message)
         } else {
             lastAlertKey = null
@@ -258,6 +350,10 @@ class MonitorService : Service() {
         // 0. Remote lock set by a parent — overrides everything.
         if (remoteLocked) {
             return BlockInfo("remote", "Locked by parent.")
+        }
+        if (now < remoteLockUntil) {
+            val mins = ((remoteLockUntil - now) / 60_000) + 1
+            return BlockInfo("remote", "Locked by parent for about $mins more min.")
         }
         // Remote bonus time granted — free pass from the other rules until it ends.
         if (now < remoteBonusUntil) {
@@ -439,6 +535,21 @@ class MonitorService : Service() {
             .setAutoCancel(true)
             .build()
         nm.notify(info.type.hashCode(), n)
+    }
+
+    /** When a whitelist/limit block starts for an app, log it for the parent. */
+    private fun maybeReportBlocked(info: BlockInfo, pkg: String) {
+        if (!Prefs.remoteReady(this) || Prefs.role(this) != "child") return
+        if (remoteReg == null) return
+        if (!(info.type.startsWith("wl:") || info.type.startsWith("lim:"))) return
+        if (info.type == lastRemoteBlockKey) return
+        lastRemoteBlockKey = info.type
+        val label = try {
+            packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
+        } catch (_: Exception) {
+            pkg
+        }
+        RemoteRepo.updateBlocked(this, label, pkg)
     }
 
     // --- misc ---

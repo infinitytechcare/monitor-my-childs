@@ -49,6 +49,11 @@ object Prefs {
         sp(c).edit().putStringSet("wl", set).apply()
     }
 
+    /** Allow only this one app (used by the "Only YouTube Kids" quick toggle). */
+    fun setOnlyAllowed(c: Context, pkg: String) {
+        sp(c).edit().putStringSet("wl", hashSetOf(pkg)).putBoolean("wl_on", true).apply()
+    }
+
     // --- per-app daily limits, stored as "pkg|minutes" ---
     fun limits(c: Context): Map<String, Int> {
         val raw = sp(c).getStringSet("limits", emptySet()) ?: emptySet()

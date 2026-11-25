@@ -240,6 +240,10 @@ fun LimitsScreen(rev: Int, bump: () -> Unit) {
                     }
                     Switch(checked = wlOn, onCheckedChange = { Prefs.setWhitelistEnabled(ctx, it); bump() })
                 }
+                OutlinedButton(
+                    onClick = { Prefs.setOnlyAllowed(ctx, "com.google.android.apps.youtube.kids"); bump() },
+                    modifier = Modifier.padding(top = 4.dp)
+                ) { Text("Quick: only YouTube Kids") }
                 Spacer(Modifier.height(12.dp))
                 Row(
                     Modifier.fillMaxWidth(),
@@ -531,7 +535,7 @@ private fun ChildRemote(ctx: Context, code: String, device: String) {
     DisposableEffect(code, device) {
         var reg: ListenerRegistration? = null
         RemoteRepo.ensureAuth { ok ->
-            if (ok) reg = RemoteRepo.listenMyDevice(ctx) { l, _ -> locked = l }
+            if (ok) reg = RemoteRepo.listenMyDevice(ctx) { cmd -> locked = cmd.locked || cmd.lockUntil > System.currentTimeMillis() }
         }
         onDispose { reg?.remove() }
     }
@@ -591,40 +595,116 @@ private fun ParentRemote(ctx: Context, code: String) {
     if (devices.isEmpty()) {
         Text("No child devices yet. Open the app on the child phone with the same family code, set its role to Child, and turn Protection on.", style = MaterialTheme.typography.bodySmall)
     }
-    devices.forEach { d ->
-        Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-            Column(Modifier.padding(12.dp)) {
+    devices.forEach { d -> DeviceCard(ctx, code, d) }
+}
+
+@Composable
+private fun DeviceCard(ctx: Context, code: String, d: RemoteDevice) {
+    val la = d.lat
+    val lo = d.lng
+    Card(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        Column(Modifier.padding(12.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(d.name, fontWeight = FontWeight.Bold)
-                Text(if (d.locked) "Locked" else "Unlocked", color = if (d.locked) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
-                Row(Modifier.padding(top = 6.dp)) {
-                    if (d.locked) Button(onClick = { RemoteRepo.setLocked(code, d.name, false) }) { Text("Unlock") }
-                    else Button(onClick = { RemoteRepo.setLocked(code, d.name, true) }) { Text("Lock now") }
+                if (d.battery in 0L..100L) Text("🔋 ${d.battery}%", style = MaterialTheme.typography.bodySmall)
+            }
+            Text(
+                when {
+                    d.locked -> "Locked"
+                    d.lockUntil > System.currentTimeMillis() -> "Locked (timed)"
+                    else -> "Unlocked"
+                },
+                color = if (d.locked || d.lockUntil > System.currentTimeMillis()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+            )
+
+            // --- lock controls ---
+            Row(Modifier.padding(top = 6.dp)) {
+                if (d.locked) Button(onClick = { RemoteRepo.setLocked(code, d.name, false) }) { Text("Unlock") }
+                else Button(onClick = { RemoteRepo.setLocked(code, d.name, true) }) { Text("Lock now") }
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(onClick = { RemoteRepo.grantMinutes(code, d.name, 30) }) { Text("+30 min") }
+            }
+            Row(Modifier.padding(top = 4.dp)) {
+                OutlinedButton(onClick = { RemoteRepo.lockForMinutes(code, d.name, 30) }) { Text("Lock 30m") }
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(onClick = { RemoteRepo.lockForMinutes(code, d.name, 60) }) { Text("Lock 1h") }
+            }
+
+            // --- usage ---
+            if (d.usageAt > 0) {
+                Spacer(Modifier.height(8.dp))
+                Text("Today's screen time: ${fmtMin(d.usageTotal.toInt())}", fontWeight = FontWeight.Medium)
+                d.usageTop.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+            }
+            if (d.usage7.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                Text("Last 7 days", fontWeight = FontWeight.Medium, style = MaterialTheme.typography.bodySmall)
+                d.usage7.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+            }
+
+            // --- location + geofence ---
+            if (la != null && lo != null) {
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("📍 %.5f, %.5f".format(la, lo), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    OutlinedButton(onClick = {
+                        ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://maps.google.com/?q=$la,$lo")))
+                    }) { Text("Map") }
+                }
+            }
+            if (d.hasZone) {
+                Text(if (d.inZone) "Inside home zone" else "⚠️ Left home zone", color = if (d.inZone) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            }
+            Row(Modifier.padding(top = 4.dp)) {
+                OutlinedButton(onClick = { RemoteRepo.requestLocation(code, d.name) }) { Text("Refresh loc") }
+                Spacer(Modifier.width(8.dp))
+                if (la != null && lo != null) {
+                    OutlinedButton(onClick = { RemoteRepo.setZone(code, d.name, la, lo, 200.0) }) { Text("Set home zone") }
+                }
+            }
+            if (d.hasZone) {
+                OutlinedButton(onClick = { RemoteRepo.clearZone(code, d.name) }, modifier = Modifier.padding(top = 4.dp)) { Text("Clear zone") }
+            }
+
+            // --- blocked app ---
+            if (d.lastBlockedApp.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Tried: ${d.lastBlockedApp}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                    if (d.lastBlockedPkg.isNotBlank()) {
+                        OutlinedButton(onClick = { RemoteRepo.allowApp(code, d.name, d.lastBlockedPkg) }) { Text("Allow") }
+                    }
+                }
+            }
+
+            // --- remote rules ---
+            Spacer(Modifier.height(10.dp))
+            HorizontalDivider()
+            Text("Remote rules", fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 6.dp))
+            Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Daily cap:", style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.width(6.dp))
+                listOf(0, 60, 120, 180).forEach { m ->
+                    TextButton(onClick = { RemoteRepo.setTotalCap(code, d.name, m) }) { Text(if (m == 0) "Off" else "${m / 60}h") }
+                }
+            }
+            Row(Modifier.padding(top = 2.dp)) {
+                OutlinedButton(onClick = { RemoteRepo.setWhitelist(code, d.name, true) }) { Text("Whitelist on") }
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(onClick = { RemoteRepo.setWhitelist(code, d.name, false) }) { Text("off") }
+            }
+            Row(Modifier.padding(top = 4.dp)) {
+                OutlinedButton(onClick = { RemoteRepo.setBedtime(code, d.name, 21 * 60, 7 * 60) }) { Text("Bedtime 9pm–7am") }
+            }
+
+            // --- request ---
+            if (d.requestPending) {
+                Spacer(Modifier.height(8.dp))
+                Text("Request: ${d.requestText}", color = MaterialTheme.colorScheme.error)
+                Row(Modifier.padding(top = 4.dp)) {
+                    Button(onClick = { RemoteRepo.grantMinutes(code, d.name, 15) }) { Text("Approve +15m") }
                     Spacer(Modifier.width(8.dp))
-                    OutlinedButton(onClick = { RemoteRepo.grantMinutes(code, d.name, 30) }) { Text("+30 min") }
-                }
-                if (d.usageAt > 0) {
-                    Spacer(Modifier.height(8.dp))
-                    Text("Today's screen time: ${fmtMin(d.usageTotal.toInt())}", fontWeight = FontWeight.Medium)
-                    d.usageTop.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
-                }
-                if (d.lat != null && d.lng != null) {
-                    Spacer(Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("📍 %.5f, %.5f".format(d.lat, d.lng), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-                        OutlinedButton(onClick = {
-                            val uri = Uri.parse("https://maps.google.com/?q=${d.lat},${d.lng}")
-                            ctx.startActivity(Intent(Intent.ACTION_VIEW, uri))
-                        }) { Text("Map") }
-                    }
-                }
-                if (d.requestPending) {
-                    Spacer(Modifier.height(8.dp))
-                    Text("Request: ${d.requestText}", color = MaterialTheme.colorScheme.error)
-                    Row(Modifier.padding(top = 4.dp)) {
-                        Button(onClick = { RemoteRepo.grantMinutes(code, d.name, 15) }) { Text("Approve +15m") }
-                        Spacer(Modifier.width(8.dp))
-                        OutlinedButton(onClick = { RemoteRepo.clearRequest(code, d.name) }) { Text("Dismiss") }
-                    }
+                    OutlinedButton(onClick = { RemoteRepo.clearRequest(code, d.name) }) { Text("Dismiss") }
                 }
             }
         }
