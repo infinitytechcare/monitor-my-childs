@@ -65,6 +65,7 @@ class MonitorService : Service() {
     private var remoteBonusUntil = 0L
     private var remoteReg: ListenerRegistration? = null
     private var remoteStarting = false
+    private var lastUsagePush = 0L
 
     // location sharing
     private var locationManager: LocationManager? = null
@@ -110,6 +111,22 @@ class MonitorService : Service() {
                 remoteLocked = locked
                 remoteBonusUntil = bonusUntil
             }
+        }
+    }
+
+    /** Child pushes its daily usage summary to the parent, about every 15 min. */
+    private fun maybePushUsage() {
+        if (!Prefs.remoteReady(this) || Prefs.role(this) != "child") return
+        if (remoteReg == null) return // wait until anonymous auth is ready
+        val now = System.currentTimeMillis()
+        if (now - lastUsagePush < 15 * 60_000) return
+        lastUsagePush = now
+        try {
+            val list = UsageRepository.usageForDay(this, 0)
+            val totalMin = (list.sumOf { it.millis } / 60_000).toInt()
+            val top = list.take(5).map { "${it.label}: ${it.millis / 60_000}m" }
+            RemoteRepo.updateUsage(this, totalMin, top)
+        } catch (_: Exception) {
         }
     }
 
@@ -196,6 +213,7 @@ class MonitorService : Service() {
 
         syncRemote()
         syncLocation()
+        maybePushUsage()
 
         val fg = foregroundApp()
         val isSystemish = fg == null || fg == packageName ||

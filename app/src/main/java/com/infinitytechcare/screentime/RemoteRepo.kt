@@ -16,7 +16,10 @@ data class RemoteDevice(
     val requestText: String,
     val lat: Double?,
     val lng: Double?,
-    val locAt: Long
+    val locAt: Long,
+    val usageTotal: Long,
+    val usageTop: List<String>,
+    val usageAt: Long
 )
 
 /**
@@ -73,6 +76,20 @@ object RemoteRepo {
         }
     }
 
+    fun updateUsage(ctx: Context, totalMin: Int, top: List<String>) {
+        val code = Prefs.familyCode(ctx)
+        val device = Prefs.deviceName(ctx)
+        if (code.isBlank() || device.isBlank()) return
+        deviceDoc(code, device).set(
+            mapOf(
+                "usageTotal" to totalMin.toLong(),
+                "usageTop" to top,
+                "usageAt" to System.currentTimeMillis()
+            ),
+            SetOptions.merge()
+        )
+    }
+
     fun updateLocation(ctx: Context, lat: Double, lng: Double) {
         val code = Prefs.familyCode(ctx)
         val device = Prefs.deviceName(ctx)
@@ -113,7 +130,10 @@ object RemoteRepo {
                         requestText = d.getString("requestText") ?: "",
                         lat = d.getDouble("lat"),
                         lng = d.getDouble("lng"),
-                        locAt = d.getLong("locAt") ?: 0L
+                        locAt = d.getLong("locAt") ?: 0L,
+                        usageTotal = d.getLong("usageTotal") ?: 0L,
+                        usageTop = (d.get("usageTop") as? List<*>)?.map { it.toString() } ?: emptyList(),
+                        usageAt = d.getLong("usageAt") ?: 0L
                     )
                 }
                 onList(list)

@@ -602,6 +602,11 @@ private fun ParentRemote(ctx: Context, code: String) {
                     Spacer(Modifier.width(8.dp))
                     OutlinedButton(onClick = { RemoteRepo.grantMinutes(code, d.name, 30) }) { Text("+30 min") }
                 }
+                if (d.usageAt > 0) {
+                    Spacer(Modifier.height(8.dp))
+                    Text("Today's screen time: ${fmtMin(d.usageTotal.toInt())}", fontWeight = FontWeight.Medium)
+                    d.usageTop.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+                }
                 if (d.lat != null && d.lng != null) {
                     Spacer(Modifier.height(8.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
