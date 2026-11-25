@@ -5,11 +5,16 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.Manifest
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.os.Build
@@ -26,6 +31,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import androidx.core.content.ContextCompat
 import com.google.firebase.firestore.ListenerRegistration
 import java.util.Calendar
 
@@ -59,6 +65,19 @@ class MonitorService : Service() {
     private var remoteBonusUntil = 0L
     private var remoteReg: ListenerRegistration? = null
     private var remoteStarting = false
+
+    // location sharing
+    private var locationManager: LocationManager? = null
+    private var locationActive = false
+    private val locationListener = object : LocationListener {
+        override fun onLocationChanged(loc: Location) {
+            RemoteRepo.updateLocation(this@MonitorService, loc.latitude, loc.longitude)
+        }
+
+        override fun onStatusChanged(provider: String?, status: Int, extras: android.os.Bundle?) {}
+        override fun onProviderEnabled(provider: String) {}
+        override fun onProviderDisabled(provider: String) {}
+    }
 
     private val tick = object : Runnable {
         override fun run() {
@@ -94,6 +113,45 @@ class MonitorService : Service() {
         }
     }
 
+    private fun hasLocationPermission(): Boolean =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+
+    /** Start or stop sending this child device's location to the parent. */
+    private fun syncLocation() {
+        val shouldShare = Prefs.remoteReady(this) && Prefs.role(this) == "child" &&
+            Prefs.isLocationShareEnabled(this) && hasLocationPermission()
+        if (shouldShare && !locationActive) {
+            // Re-assert the foreground service with the location type now that
+            // permission is granted, so location access is allowed on Android 14+.
+            startForegroundNotification()
+            val lm = locationManager ?: (getSystemService(Context.LOCATION_SERVICE) as LocationManager).also { locationManager = it }
+            try {
+                if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                    lm.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 120_000L, 25f, locationListener)
+                }
+                if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                    lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 120_000L, 25f, locationListener)
+                }
+                locationActive = true
+                // push an immediate last-known fix if available
+                val last = try {
+                    lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+                        ?: lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                } catch (_: SecurityException) {
+                    null
+                }
+                if (last != null) RemoteRepo.updateLocation(this, last.latitude, last.longitude)
+            } catch (_: SecurityException) {
+            }
+        } else if (!shouldShare && locationActive) {
+            locationManager?.removeUpdates(locationListener)
+            locationActive = false
+        }
+    }
+
     /** Attach or detach the remote listener as settings change at runtime. */
     private fun syncRemote() {
         val shouldListen = Prefs.remoteReady(this) && Prefs.role(this) == "child"
@@ -119,6 +177,10 @@ class MonitorService : Service() {
     override fun onDestroy() {
         handler.removeCallbacks(tick)
         remoteReg?.remove()
+        if (locationActive) {
+            locationManager?.removeUpdates(locationListener)
+            locationActive = false
+        }
         removeOverlay()
         super.onDestroy()
     }
@@ -133,6 +195,7 @@ class MonitorService : Service() {
         }
 
         syncRemote()
+        syncLocation()
 
         val fg = foregroundApp()
         val isSystemish = fg == null || fg == packageName ||
@@ -390,10 +453,12 @@ class MonitorService : Service() {
             .setContentIntent(openIntent)
             .build()
 
-        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-        } else {
-            0
+        var type = 0
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            type = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            if (hasLocationPermission()) {
+                type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+            }
         }
         ServiceCompat.startForeground(this, 1, notification, type)
     }

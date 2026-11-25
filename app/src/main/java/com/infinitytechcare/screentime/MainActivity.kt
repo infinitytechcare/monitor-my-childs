@@ -523,8 +523,37 @@ private fun ChildRemote(ctx: Context, code: String, device: String) {
         onDispose { reg?.remove() }
     }
     var msg by remember { mutableStateOf("") }
+    var locShare by remember { mutableStateOf(Prefs.isLocationShareEnabled(ctx)) }
+
+    val locLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { result ->
+        val granted = result.values.any { it }
+        Prefs.setLocationShareEnabled(ctx, granted)
+        locShare = granted
+    }
+
     Text("This is a CHILD device.", fontWeight = FontWeight.Bold)
     Text(if (locked) "Status: Locked by parent" else "Status: Unlocked", color = if (locked) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
+
+    Spacer(Modifier.height(12.dp))
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Share this device's location", fontWeight = FontWeight.Bold)
+            Text("Sends this phone's location to the parent. For continuous updates, choose \"Allow all the time\" in the Android prompt.", style = MaterialTheme.typography.bodySmall)
+        }
+        Switch(checked = locShare, onCheckedChange = { on ->
+            if (on) {
+                locLauncher.launch(
+                    arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION)
+                )
+            } else {
+                Prefs.setLocationShareEnabled(ctx, false)
+                locShare = false
+            }
+        })
+    }
+
     Spacer(Modifier.height(12.dp))
     OutlinedTextField(msg, { msg = it }, label = { Text("Message (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
     Spacer(Modifier.height(8.dp))
@@ -559,6 +588,16 @@ private fun ParentRemote(ctx: Context, code: String) {
                     else Button(onClick = { RemoteRepo.setLocked(code, d.name, true) }) { Text("Lock now") }
                     Spacer(Modifier.width(8.dp))
                     OutlinedButton(onClick = { RemoteRepo.grantMinutes(code, d.name, 30) }) { Text("+30 min") }
+                }
+                if (d.lat != null && d.lng != null) {
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("📍 %.5f, %.5f".format(d.lat, d.lng), style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                        OutlinedButton(onClick = {
+                            val uri = Uri.parse("https://maps.google.com/?q=${d.lat},${d.lng}")
+                            ctx.startActivity(Intent(Intent.ACTION_VIEW, uri))
+                        }) { Text("Map") }
+                    }
                 }
                 if (d.requestPending) {
                     Spacer(Modifier.height(8.dp))

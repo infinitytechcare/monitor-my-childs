@@ -13,7 +13,10 @@ data class RemoteDevice(
     val locked: Boolean,
     val bonusUntil: Long,
     val requestPending: Boolean,
-    val requestText: String
+    val requestText: String,
+    val lat: Double?,
+    val lng: Double?,
+    val locAt: Long
 )
 
 /**
@@ -70,6 +73,16 @@ object RemoteRepo {
         }
     }
 
+    fun updateLocation(ctx: Context, lat: Double, lng: Double) {
+        val code = Prefs.familyCode(ctx)
+        val device = Prefs.deviceName(ctx)
+        if (code.isBlank() || device.isBlank()) return
+        deviceDoc(code, device).set(
+            mapOf("lat" to lat, "lng" to lng, "locAt" to System.currentTimeMillis()),
+            SetOptions.merge()
+        )
+    }
+
     fun askForTime(ctx: Context, text: String) {
         val code = Prefs.familyCode(ctx)
         val device = Prefs.deviceName(ctx)
@@ -97,7 +110,10 @@ object RemoteRepo {
                         locked = d.getBoolean("locked") ?: false,
                         bonusUntil = d.getLong("bonusUntil") ?: 0L,
                         requestPending = d.getBoolean("requestPending") ?: false,
-                        requestText = d.getString("requestText") ?: ""
+                        requestText = d.getString("requestText") ?: "",
+                        lat = d.getDouble("lat"),
+                        lng = d.getDouble("lng"),
+                        locAt = d.getLong("locAt") ?: 0L
                     )
                 }
                 onList(list)

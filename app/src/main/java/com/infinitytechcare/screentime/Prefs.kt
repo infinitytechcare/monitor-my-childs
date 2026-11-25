@@ -115,6 +115,10 @@ object Prefs {
     fun role(c: Context): String = sp(c).getString("rc_role", "child") ?: "child"
     fun setRole(c: Context, v: String) = sp(c).edit().putString("rc_role", v).apply()
 
+    // child shares this device's location with the parent (transparent, opt-in)
+    fun isLocationShareEnabled(c: Context) = sp(c).getBoolean("rc_loc", false)
+    fun setLocationShareEnabled(c: Context, v: Boolean) = sp(c).edit().putBoolean("rc_loc", v).apply()
+
     fun remoteReady(c: Context): Boolean =
         isRemoteEnabled(c) && familyCode(c).isNotBlank() && deviceName(c).isNotBlank()
 }
