@@ -367,6 +367,7 @@ fun SetupScreen(rev: Int, bump: () -> Unit) {
     val adminOk = remember(rev) { isAdminActive(ctx) }
     val svcOn = remember(rev) { Prefs.isServiceEnabled(ctx) }
     val alertsOn = remember(rev) { Prefs.isAlertsEnabled(ctx) }
+    val brkOn = remember(rev) { Prefs.isBreakEnabled(ctx) }
     val brkAfter = remember(rev) { Prefs.breakAfterMinutes(ctx) }
     val brkFor = remember(rev) { Prefs.breakForMinutes(ctx) }
 
@@ -416,12 +417,24 @@ fun SetupScreen(rev: Int, bump: () -> Unit) {
 
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("Forced break after", fontWeight = FontWeight.Bold)
-            TextButton(onClick = { Prefs.setBreakAfterMinutes(ctx, cycleNext(brkAfter, MIN_OPTIONS)); bump() }) { Text(fmtMin(brkAfter)) }
+            Column(Modifier.weight(1f)) {
+                Text("Forced breaks", fontWeight = FontWeight.Bold)
+                Text("Lock the phone for a rest after long continuous use.", style = MaterialTheme.typography.bodySmall)
+            }
+            Switch(checked = brkOn, onCheckedChange = { Prefs.setBreakEnabled(ctx, it); bump() })
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("Break length", fontWeight = FontWeight.Bold)
-            TextButton(onClick = { Prefs.setBreakForMinutes(ctx, cycleNext(brkFor, BREAK_FOR_OPTIONS)); bump() }) { Text(fmtMin(brkFor)) }
+        if (brkOn) {
+            Row(Modifier.fillMaxWidth().padding(start = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("Break after")
+                TextButton(onClick = {
+                    val next = cycleNext(brkAfter, MIN_OPTIONS)
+                    Prefs.setBreakAfterMinutes(ctx, if (next == 0) 15 else next); bump()
+                }) { Text(fmtMin(if (brkAfter == 0) 45 else brkAfter)) }
+            }
+            Row(Modifier.fillMaxWidth().padding(start = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("Break length")
+                TextButton(onClick = { Prefs.setBreakForMinutes(ctx, cycleNext(brkFor, BREAK_FOR_OPTIONS)); bump() }) { Text(fmtMin(brkFor)) }
+            }
         }
 
         Spacer(Modifier.height(16.dp))

@@ -28,8 +28,10 @@ object Prefs {
     fun totalCapMinutes(c: Context) = sp(c).getInt("cap", 0)
     fun setTotalCapMinutes(c: Context, v: Int) = sp(c).edit().putInt("cap", v).apply()
 
-    // --- forced break: after N continuous minutes, lock for M minutes (0 = off) ---
-    fun breakAfterMinutes(c: Context) = sp(c).getInt("brk_after", 0)
+    // --- forced break: after N continuous minutes, lock for M minutes ---
+    fun isBreakEnabled(c: Context) = sp(c).getBoolean("brk_on", false)
+    fun setBreakEnabled(c: Context, v: Boolean) = sp(c).edit().putBoolean("brk_on", v).apply()
+    fun breakAfterMinutes(c: Context) = sp(c).getInt("brk_after", 45)
     fun setBreakAfterMinutes(c: Context, v: Int) = sp(c).edit().putInt("brk_after", v).apply()
     fun breakForMinutes(c: Context) = sp(c).getInt("brk_for", 10)
     fun setBreakForMinutes(c: Context, v: Int) = sp(c).edit().putInt("brk_for", v).apply()

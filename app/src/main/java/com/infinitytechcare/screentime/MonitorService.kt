@@ -227,7 +227,7 @@ class MonitorService : Service() {
             // a 2-minute gap of no foreground app counts as a real break
             if (now - lastActiveWall > 2 * 60_000) continuousActiveMs = 0
         }
-        val breakAfter = Prefs.breakAfterMinutes(this)
+        val breakAfter = if (Prefs.isBreakEnabled(this)) Prefs.breakAfterMinutes(this) else 0
         if (breakAfter > 0 && continuousActiveMs / 60_000 >= breakAfter && now >= breakUntil) {
             breakUntil = now + Prefs.breakForMinutes(this) * 60_000L
             continuousActiveMs = 0
