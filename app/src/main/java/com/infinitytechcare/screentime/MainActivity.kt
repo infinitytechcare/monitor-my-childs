@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -598,6 +599,7 @@ private fun ParentRemote(ctx: Context, code: String) {
     devices.forEach { d -> DeviceCard(ctx, code, d) }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DeviceCard(ctx: Context, code: String, d: RemoteDevice) {
     val la = d.lat
@@ -681,21 +683,33 @@ private fun DeviceCard(ctx: Context, code: String, d: RemoteDevice) {
             Spacer(Modifier.height(10.dp))
             HorizontalDivider()
             Text("Remote rules", fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 6.dp))
-            Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Daily cap:", style = MaterialTheme.typography.bodySmall)
-                Spacer(Modifier.width(6.dp))
+            Text("The highlighted (filled) chip is what's active now.", style = MaterialTheme.typography.bodySmall)
+
+            Text("Daily cap", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 listOf(0, 60, 120, 180).forEach { m ->
-                    TextButton(onClick = { RemoteRepo.setTotalCap(code, d.name, m) }) { Text(if (m == 0) "Off" else "${m / 60}h") }
+                    FilterChip(
+                        selected = d.curCap == m.toLong(),
+                        onClick = { RemoteRepo.setTotalCap(code, d.name, m) },
+                        label = { Text(if (m == 0) "Off" else "${m / 60}h") },
+                        modifier = Modifier.padding(end = 6.dp)
+                    )
                 }
             }
-            Row(Modifier.padding(top = 2.dp)) {
-                OutlinedButton(onClick = { RemoteRepo.setWhitelist(code, d.name, true) }) { Text("Whitelist on") }
-                Spacer(Modifier.width(8.dp))
-                OutlinedButton(onClick = { RemoteRepo.setWhitelist(code, d.name, false) }) { Text("off") }
+
+            Text("Allowed-apps only", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
+            Row {
+                FilterChip(selected = d.curWlOn, onClick = { RemoteRepo.setWhitelist(code, d.name, true) }, label = { Text("On") }, modifier = Modifier.padding(end = 6.dp))
+                FilterChip(selected = !d.curWlOn, onClick = { RemoteRepo.setWhitelist(code, d.name, false) }, label = { Text("Off") })
             }
-            Row(Modifier.padding(top = 4.dp)) {
-                OutlinedButton(onClick = { RemoteRepo.setBedtime(code, d.name, 21 * 60, 7 * 60) }) { Text("Bedtime 9pm–7am") }
-            }
+
+            val bedActive = d.curBedStart == (21 * 60).toLong() && d.curBedEnd == (7 * 60).toLong()
+            Text("Bedtime", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
+            FilterChip(
+                selected = bedActive,
+                onClick = { if (bedActive) RemoteRepo.setBedtime(code, d.name, -1, -1) else RemoteRepo.setBedtime(code, d.name, 21 * 60, 7 * 60) },
+                label = { Text("9pm–7am") }
+            )
 
             // --- request ---
             if (d.requestPending) {

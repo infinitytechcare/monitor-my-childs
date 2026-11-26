@@ -68,6 +68,7 @@ class MonitorService : Service() {
     private var remoteStarting = false
     private var lastUsagePush = 0L
     private var lastBatteryPush = 0L
+    private var lastConfigSig = ""
 
     // remote timed lock + geofence (set by the command listener)
     private var remoteLockUntil = 0L
@@ -134,7 +135,9 @@ class MonitorService : Service() {
         cmd.cfgWhitelist?.let { Prefs.setWhitelistEnabled(this, it) }
         if (cmd.cfgBedStart != null && cmd.cfgBedEnd != null) {
             Prefs.windows(this).filter { it.label == "Bedtime" }.forEach { Prefs.removeWindow(this, it) }
-            Prefs.addWindow(this, LockWindow(cmd.cfgBedStart.toInt(), cmd.cfgBedEnd.toInt(), "Bedtime"))
+            if (cmd.cfgBedStart >= 0 && cmd.cfgBedEnd >= 0) {
+                Prefs.addWindow(this, LockWindow(cmd.cfgBedStart.toInt(), cmd.cfgBedEnd.toInt(), "Bedtime"))
+            }
         }
         if (cmd.allowApp.isNotBlank()) {
             Prefs.setAppAllowed(this, cmd.allowApp, true)
@@ -178,6 +181,21 @@ class MonitorService : Service() {
             lastInZone = inside
             RemoteRepo.updateZoneStatus(this, hasZone = true, inZone = inside)
         }
+    }
+
+    /** Report the child's current effective settings whenever they change. */
+    private fun maybePushConfigState() {
+        if (!Prefs.remoteReady(this) || Prefs.role(this) != "child") return
+        if (remoteReg == null) return
+        val cap = Prefs.totalCapMinutes(this)
+        val wlOn = Prefs.isWhitelistEnabled(this)
+        val bed = Prefs.windows(this).firstOrNull { it.label == "Bedtime" }
+        val bedStart = bed?.startMin ?: -1
+        val bedEnd = bed?.endMin ?: -1
+        val sig = "$cap|$wlOn|$bedStart|$bedEnd"
+        if (sig == lastConfigSig) return
+        lastConfigSig = sig
+        RemoteRepo.updateConfigState(this, cap, wlOn, bedStart, bedEnd)
     }
 
     private fun maybePushBattery() {
@@ -305,6 +323,7 @@ class MonitorService : Service() {
         syncLocation()
         maybePushUsage()
         maybePushBattery()
+        maybePushConfigState()
 
         val fg = foregroundApp()
         val isSystemish = fg == null || fg == packageName ||

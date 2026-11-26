@@ -28,7 +28,11 @@ data class RemoteDevice(
     val inZone: Boolean,
     val lastBlockedApp: String,
     val lastBlockedPkg: String,
-    val lastBlockedAt: Long
+    val lastBlockedAt: Long,
+    val curCap: Long,
+    val curWlOn: Boolean,
+    val curBedStart: Long,
+    val curBedEnd: Long
 )
 
 /** Commands + config a parent set, delivered to the child device. */
@@ -153,6 +157,19 @@ object RemoteRepo {
         )
     }
 
+    /** Child reports its current effective settings so the parent can show what's active. */
+    fun updateConfigState(ctx: Context, cap: Int, wlOn: Boolean, bedStart: Int, bedEnd: Int) {
+        childWrite(
+            ctx,
+            mapOf(
+                "curCap" to cap.toLong(),
+                "curWlOn" to wlOn,
+                "curBedStart" to bedStart.toLong(),
+                "curBedEnd" to bedEnd.toLong()
+            )
+        )
+    }
+
     fun clearLocRequest(ctx: Context) = childWrite(ctx, mapOf("locRequest" to false))
     fun clearAllowApp(ctx: Context) = childWrite(ctx, mapOf("allowApp" to ""))
 
@@ -191,7 +208,11 @@ object RemoteRepo {
                         inZone = d.getBoolean("inZone") ?: true,
                         lastBlockedApp = d.getString("lastBlockedApp") ?: "",
                         lastBlockedPkg = d.getString("lastBlockedPkg") ?: "",
-                        lastBlockedAt = d.getLong("lastBlockedAt") ?: 0L
+                        lastBlockedAt = d.getLong("lastBlockedAt") ?: 0L,
+                        curCap = d.getLong("curCap") ?: -1L,
+                        curWlOn = d.getBoolean("curWlOn") ?: false,
+                        curBedStart = d.getLong("curBedStart") ?: -1L,
+                        curBedEnd = d.getLong("curBedEnd") ?: -1L
                     )
                 }
                 onList(list)
