@@ -11,6 +11,9 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      VERSION_CODE: ${{ github.run_number }}
+      VERSION_NAME: 1.0.${{ github.run_number }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -44,5 +47,5 @@ jobs:
           gh release delete latest --yes --cleanup-tag 2>/dev/null || true
           gh release create latest \
             app/build/outputs/apk/debug/app-debug.apk \
-            --title "Latest debug APK" \
-            --notes "Auto-built debug APK. Install on the family phone, open the app, then turn on Usage access in Settings."
+            --title "Family Screen Time v$VERSION_NAME" \
+            --notes "Version $VERSION_NAME (build $VERSION_CODE). Install on the family phone, open the app, then turn on Usage access in Settings."

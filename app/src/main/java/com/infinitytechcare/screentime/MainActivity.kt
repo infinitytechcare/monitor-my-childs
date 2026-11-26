@@ -461,7 +461,9 @@ fun SetupScreen(rev: Int, bump: () -> Unit) {
         }
 
         Spacer(Modifier.height(24.dp))
-        Text("This app keeps everything on the phone. It does not record the screen, microphone, messages or location, and sends nothing to anyone.", style = MaterialTheme.typography.bodySmall)
+        Text("This app keeps your data on the phone and the family's own Firebase. It does not record the screen, microphone, messages or keystrokes.", style = MaterialTheme.typography.bodySmall)
+        Spacer(Modifier.height(8.dp))
+        Text("Version ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodySmall)
         Spacer(Modifier.height(24.dp))
     }
 }
